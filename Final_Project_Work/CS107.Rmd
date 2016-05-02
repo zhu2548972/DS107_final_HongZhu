@@ -1,0 +1,446 @@
+---
+title: "CS107_final"
+author: "Hong Zhu"
+date: "April 30, 2016"
+output: html_document
+---
+
+There are many animals ending up in shelters every year. 35% (2.7 millions out of 7.6 millions) of dogs and cats are euthanized by the shelter due to no adoptions for long or disease, and the rest of them are able to be adopted, transferred or returned to owners by animal adopter. We believe that some animals required more help than others to find a adopter. Currently, the animal shelters are using experience or knowledge to make a subjective judgement to decide it, such as their looking, age and size. However, we can use more information including breed, color, sex, name to make a better judgement. For example, we want to research the relationship between a pet's outcome and whether it has name. If we are seeing pets with names have more probability to find permanent home, we should suggest animal shelters spent more time on naming pets. Whether a pet has a name or not is just one factor of this project, and we will use Machine Learning and Regression to help animal shelter find key factors that impact the outcomes of animals in a quantified way.
+
+Kaggle is hosting a competition since March 21, 2016 to help improve outcomes for shelter animals, in which more than 300 teams participate to predict the outcome of each animal using a dataset of intake information including breed, color, sex, and age from the Austin Animal Center from October 1st, 2013 to March, 2016. The insights could help shelters focus their energy on specific animals who need extra help finding a good adopter.
+
+At the mean time, Kaggle will provide test data, and all submissions are evaluated using the multi-class logarithmic loss.
+
+Read test data at first:
+
+```{r}
+library(lubridate)
+library(gridExtra)
+library(ggplot2)
+library(dplyr)
+setwd("/Users/hongzhu/Desktop")
+train<-read.csv("train.csv")
+```
+
+#EDA and Visualization
+
+To understand the data, I did data wrangling, data visualization, and some other exploratory data analysis at the beginning. 
+
+##A) Research Name/Age of animals and their outcomes
+
+At first, I notice that in the Name column, there are some lots of missing values. In other words, many of the animals in animal shelter do not have names, so I create a new column hasname to show whether animal has name or not. 1 means has name, and 0 means does not have a name. 
+
+```{r}
+train$Name=as.character(train$Name)
+train=train %>% mutate(hasname=ifelse(nchar(Name)==0,0,1))
+train2<-train
+train %>% group_by(hasname,OutcomeType) %>% summarize(count=n()) %>% 
+  ggplot(aes(x = hasname, y = count, fill = OutcomeType)) +
+  geom_bar(stat = 'identity', position = 'fill',colour="black") 
+```
+
+We can see that the animals who have names have much more probability to be adopted. Then, I want to research on the relationshop between hasname and the age of animals. I have an assumption that younger animals might have lower probability to have a name, since they may be to young to be given a name by animal shelter. 
+
+```{r,warning=FALSE}
+train$AgeuponOutcome=as.character(train$AgeuponOutcome)
+train$AgeValue <- sapply(train$AgeuponOutcome, function(x) strsplit(x, split =' ')[[1]][1])
+train$AgeUnit <- sapply(train$AgeuponOutcome, function(x) strsplit(x, split =' ')[[1]][2])
+train$AgeValue  <- as.numeric(train$AgeValue)
+train$AgeUnit <- as.factor(train$AgeUnit)
+train$AgeUnit <- gsub('s', '', train$AgeUnit)
+UnitTrans <- ifelse(train$AgeUnit == 'day', 1/7, ifelse(train$AgeUnit == 'week', 1,
+              ifelse(train$AgeUnit == 'month', 4, ifelse(train$AgeUnit == 'year', 52, NA))))
+
+train$AgeWeeks <- train$AgeValue * UnitTrans
+
+train$LifeStage[train$AgeWeeks<=8]<-"a <8 weeks"
+train$LifeStage[train$AgeWeeks %in% c(8:30)]<-"b 8-30 weeks"
+train$LifeStage[train$AgeWeeks %in% c(30:60)]<-"c 30-60 weeks"
+train$LifeStage[train$AgeWeeks >=60]<-"d >60 weeks"
+train %>% group_by(LifeStage,hasname, OutcomeType) %>% summarize(count=n()) %>% 
+  ggplot(aes(x = LifeStage, y = count, fill = OutcomeType)) +
+  geom_bar(stat = 'identity', position = 'fill',colour="black") +
+  facet_grid(hasname~.) ->g1
+train %>% group_by(LifeStage,hasname) %>% summarize(count=n()) %>%
+  ggplot(aes(x = LifeStage, y = count,fill = factor(hasname))) +
+  geom_bar(stat = 'identity', colour="black") ->g2
+grid.arrange(g2,g1,ncol=1,heights=c(1,3))
+```
+
+We can tell from the plot that younger animals (animals younger than 8 weeks) have lower probability to have names, it should be because employees in animal center were too busy to give a newly-born animal a name. However, an animal younger than 8 weeks will have a much better chance to be adopted and lower chance to be transferred if it has a name. It is not surprising to see from the top graph that animals have much higher probability to have a name as they grow up, however, we are seeing the same pattern that animals with names are much more easily to be adopted on animals in all life stages. In addition, senior animals (animals older than 60 weeks) without names have much higher probability to be euthanized in animal shelter. I assume that it should be easier for potential adopters to have connections with animals with names, since animals may be trained to response if people call their names.
+
+Given such different outcomes between animals with names and without names, I would recommend animal shelters spend time in naming animals and train them by calling their names, especially for senior animals and baby animals (animals in the first and fourth life stages).
+
+##B) Research TimeUponOutcome of animals and their outcomes
+
+```{r}
+train$Hour    <- hour(train$DateTime)
+train$Weekday <- wday(train$DateTime)
+train$Month   <- month(train$DateTime)
+train$Year    <- year(train$DateTime)
+train %>% group_by(Hour,OutcomeType) %>% summarize(count=n()) %>%
+  ggplot(aes(x = Hour, y = count,fill = OutcomeType)) +
+  geom_bar(stat = 'identity', colour="black")+ggtitle("HOUR")+xlab("")->g_hour
+train %>% group_by(Weekday,OutcomeType) %>% summarize(count=n()) %>%
+  ggplot(aes(x = Weekday, y = count,fill = OutcomeType)) +
+  geom_bar(stat = 'identity', colour="black")+ggtitle("WEEKDAY")+xlab("") ->g_weekday
+train %>% group_by(Month,OutcomeType) %>% summarize(count=n()) %>%
+  ggplot(aes(x = Month, y = count,fill = OutcomeType)) +
+  geom_bar(stat = 'identity', colour="black")+ggtitle("MONTH")+xlab("") ->g_month
+train %>% group_by(Year,OutcomeType) %>% summarize(count=n()) %>%
+  ggplot(aes(x = Year, y = count,fill = OutcomeType)) +
+  geom_bar(stat = 'identity', colour="black")+ggtitle("YEAR")+xlab("") ->g_year
+grid.arrange(g_hour,g_weekday,g_month,g_year,ncol=2,heights=c(1,1))
+```
+
+In the plots above, I split TimeUponOutcome column into year, month, weekday and hour. We can see some interesting points in here. 
+
+1) People incline to adpot animals at ~17-19 every day, since people might be interested in going to animal shelters after work. 
+2) People prefer to adopt animals during weekends. 
+3) People do not want to do a lots at around 10 am. 
+4) The fourth plot cannot give us much informations, since we only have 3 months of data in 2013 and 2015. 
+
+##C) Research AnimalTypes and their outcomes
+
+```{r}
+#Animal Type and Outcome
+train %>% group_by(AnimalType,OutcomeType) %>% summarize(count=n()) %>%
+  ggplot(aes(x = AnimalType, y = count,fill = OutcomeType)) +
+  geom_bar(stat = 'identity',position = 'fill', colour="black")+ theme(legend.position="bottom") ->g_animal1
+
+train %>% group_by(AnimalType) %>% summarize(count=n()) %>%
+  ggplot(aes(x = AnimalType, y = count)) + geom_bar(stat="identity") ->g_animal2
+
+grid.arrange(g_animal2,g_animal1,ncol=1,heights=c(1,3))
+```
+
+We have more dogs than cats in this given dataset. Dogs and cats have equal chance to be adopted, but dogs have higher chance to be returned to owner and lower chance to be transferred to others than cats. 
+
+##D) Research Sex/Intactness and their outcomes
+
+Both male and female animals have similar chance to have all kinds of outcomes. 
+
+```{r}
+train$SexuponOutcome=as.character(train$SexuponOutcome)
+train$advSex <- sapply(train$SexuponOutcome, function(x) strsplit(x, split =' ')[[1]][2])
+train %>% group_by(advSex,OutcomeType) %>% summarize(count=n()) %>%
+  ggplot(aes(x = advSex, y = count,fill = OutcomeType)) +
+  geom_bar(stat = 'identity',position="fill", colour="black")
+```
+
+However, intact animals have much lower chance to be adopted and higher chance to be transferred or returned to owners than spayed/neutered animals. 
+
+```{r}
+train$intact_tmp <- sapply(train$SexuponOutcome, function(x) strsplit(x, split =' ')[[1]][1])
+train$intact=ifelse(train$intact_tmp=="Intact",1,0)
+train %>% group_by(intact,advSex,OutcomeType) %>% summarize(count=n()) %>%
+  ggplot(aes(x = intact, y = count,fill = OutcomeType)) +
+  geom_bar(stat = 'identity',position="fill", colour="black")+facet_grid(.~advSex)
+```
+
+##E) 80-20 Rule in Color and Breed of Animals
+
+In training data, all animals share 366 colors and 1380 breeds in total. However, these colors and breeds are not equally spreaded among all animals, I figured an 80-20 rule existing in the distribution of breeds and colors: the majority animals have very small amount of breeds and colors. 
+
+```{r}
+#Color
+tmp_pdf<-list()
+tmp<-train %>% group_by(Color) %>% summarize(count=n()) %>% arrange(desc(count)) %>% mutate(pct=count/sum(count))
+for (i in c(1:nrow(tmp))){
+  pdf_tmp<-sum(tmp$pct[1:i])
+  tmp_pdf[i]<-pdf_tmp
+}
+tmp$pdf<-unlist(tmp_pdf)
+plot(tmp$pdf,ylab="CDF",xlab="Colors",main="CDF of Colors")
+
+#Breed
+tmp_pdf_b<-list()
+tmp_b<-train %>% group_by(Breed) %>% summarize(count=n()) %>% arrange(desc(count)) %>% mutate(pct=count/sum(count))
+for (i in c(1:nrow(tmp_b))){
+  pdf_tmp_b<-sum(tmp_b$pct[1:i])
+  tmp_pdf_b[i]<-pdf_tmp_b
+}
+tmp_b$pdf<-unlist(tmp_pdf_b)
+plot(tmp_b$pdf,ylab="CDF",xlab="Breeds",main="CDF of Breeds")
+```
+
+#Data Modeling
+
+Get both train and test data from Kaggle, since we need to do data wrangling on both of them in the same way. 
+
+```{r}
+setwd("/Users/hongzhu/Desktop")
+train_data<-read.csv("train.csv")
+test_data<-read.csv("test.csv")
+```
+
+##Data Wrangling for Train and Test Data
+
+###1) Data Preparation 
+
+* We need to check if test and train data given by Kaggle having all names and breed overlapped, otherwise if there is some names or breeds only included in test data but not in train data, it will give us some difficulties to do prediction. 
+
+```{r}
+BreedSummary=table(c(as.character(train_data$Breed),as.character(test_data$Breed)))
+trainNameSummary <- table(c(as.character(train_data$Name),as.character(test_data$Name)))
+```
+
+* Delete data we do not need for data modeling, such as AnimalID and Subtype of outcome which is not given in test data
+
+```{r}
+train_data$AnimalID=NULL
+test_data$ID=NULL
+train_data$OutcomeSubtype=NULL
+```
+
+###2) Data Wrangling
+
+* For animal name
+
+First, created hasname for both test data and train data
+
+```{r}
+train_data=train_data %>% mutate(hasname=ifelse(nchar(as.character(Name))==0,0,1))
+test_data=test_data %>% mutate(hasname=ifelse(nchar(as.character(Name))==0,0,1))
+```
+
+Second, create namepop to measure the popularity of a name, with assumption that animals has most and least popular name might be easiler to be adopted.  
+
+```{r}
+train_data$namepop <- trainNameSummary[match(train_data$Name,names(trainNameSummary))]
+test_data$namepop <- trainNameSummary[match(test_data$Name,names(trainNameSummary))]
+```
+
+Third, create namelength to measure the length of animal names, with assumption that animals have shorter names might be easier to be adopted. 
+
+```{r}
+train_data$namelength <- nchar(as.character(train_data$Name))
+test_data$namelength <- nchar(as.character(test_data$Name))
+#delete Name columns from train and test data
+test_data$Name=NULL
+train_data$Name=NULL
+```
+
+* For animal breed
+
+I create breedpop to measure the popularity of a breed, with assumption that animals of rare breed are easier to be adopted. 
+
+```{r}
+train_data$breedpop <- BreedSummary[match(train_data$Breed,names(BreedSummary))]
+test_data$breedpop <- BreedSummary[match(test_data$Breed,names(BreedSummary))]
+train_data$Breed=NULL
+test_data$Breed=NULL
+```
+
+* For animal age
+
+I unify AgeuponOutcome that are in different units with the same unit (week), then create a new column AgeWeeks.
+
+```{r}
+train_data$AgeuponOutcome=as.character(train_data$AgeuponOutcome)
+train_data$AgeValue <- sapply(train_data$AgeuponOutcome, function(x) strsplit(x, split =' ')[[1]][1])
+train_data$AgeUnit <- sapply(train_data$AgeuponOutcome, function(x) strsplit(x, split =' ')[[1]][2])
+train_data$AgeValue  <- as.numeric(train_data$AgeValue)
+train_data$AgeUnit <- as.factor(train_data$AgeUnit)
+train_data$AgeUnit <- gsub('s', '', train_data$AgeUnit)
+UnitTrans <- ifelse(train_data$AgeUnit == 'day', 1/7, ifelse(train_data$AgeUnit == 'week', 1,
+                                                        ifelse(train_data$AgeUnit == 'month', 4, ifelse(train_data$AgeUnit == 'year', 52, NA))))
+train_data$AgeWeeks <- train_data$AgeValue * UnitTrans
+train_data$AgeValue=NULL
+train_data$AgeUnit=NULL
+train_data$AgeuponOutcome=NULL
+```
+
+I need to unify units in test data too. 
+
+```{r}
+##############test data#################
+test_data$AgeuponOutcome=as.character(test_data$AgeuponOutcome)
+test_data$AgeValue <- sapply(test_data$AgeuponOutcome, function(x) strsplit(x, split =' ')[[1]][1])
+test_data$AgeUnit <- sapply(test_data$AgeuponOutcome, function(x) strsplit(x, split =' ')[[1]][2])
+test_data$AgeValue  <- as.numeric(test_data$AgeValue)
+test_data$AgeUnit <- as.factor(test_data$AgeUnit)
+test_data$AgeUnit <- gsub('s', '', test_data$AgeUnit)
+UnitTrans <- ifelse(test_data$AgeUnit == 'day', 1/7, ifelse(test_data$AgeUnit == 'week', 1,
+                                                             ifelse(test_data$AgeUnit == 'month', 4, ifelse(test_data$AgeUnit == 'year', 52, NA))))
+test_data$AgeWeeks <- test_data$AgeValue * UnitTrans
+test_data$AgeValue=NULL
+test_data$AgeUnit=NULL
+test_data$AgeuponOutcome=NULL
+```
+
+* For animal time upon outcome
+
+I split TimeuponOutcome in to hour, month and weekday. 
+
+```{r}
+train_data$Hour    <- hour(train_data$DateTime)
+train_data$Weekday <- wday(train_data$DateTime)
+train_data$Month   <- month(train_data$DateTime)
+train_data$Year    <- year(train_data$DateTime)
+test_data$Hour    <- hour(test_data$DateTime)
+test_data$Weekday <- wday(test_data$DateTime)
+test_data$Month   <- month(test_data$DateTime)
+test_data$Year    <- year(test_data$DateTime)
+train_data$DateTime=NULL
+test_data$DateTime=NULL
+```
+
+* For animal sex
+
+Split sex and intactness
+
+```{r}
+train_data$SexuponOutcome=as.character(train_data$SexuponOutcome)
+train_data$advSex <- sapply(train_data$SexuponOutcome, function(x) strsplit(x, split =' ')[[1]][2])
+test_data$SexuponOutcome=as.character(test_data$SexuponOutcome)
+test_data$advSex <- sapply(test_data$SexuponOutcome, function(x) strsplit(x, split =' ')[[1]][2])
+train_data$intact_tmp <- sapply(train_data$SexuponOutcome, function(x) strsplit(x, split =' ')[[1]][1])
+train_data$intact=ifelse(train_data$intact_tmp=="Intact",1,-1)
+train_data$intact[which(train_data$intact_tmp=="Unknown")]=0
+train_data$intact[which(is.na(train_data$intact))]=0
+train_data$advSex[which(is.na(train_data$advSex))]="Unknown"
+test_data$intact_tmp <- sapply(test_data$SexuponOutcome, function(x) strsplit(x, split =' ')[[1]][1])
+test_data$intact=ifelse(test_data$intact_tmp=="Intact",1,-1)
+test_data$intact[which(test_data$intact_tmp=="Unknown")]=0
+test_data$intact[which(is.na(test_data$intact))]=0
+test_data$advSex[which(is.na(test_data$advSex))]="Unknown"
+train_data$intact_tmp=NULL
+test_data$intact_tmp=NULL
+train_data$SexuponOutcome=NULL
+test_data$SexuponOutcome=NULL
+```
+
+* For Color
+
+Create three columes is_black, is_white, and multi-color. 
+
+```{r}
+train_data$multi_color=0
+train_data$multi_color[grep("Tri",train_data$Color)]=1
+train_data$multi_color[grep("/",train_data$Color)]=1
+test_data$multi_color=0
+test_data$multi_color[grep("Tri",test_data$Color)]=1
+test_data$multi_color[grep("/",test_data$Color)]=1
+train_data$has_black=0
+train_data$has_black[grep("Black",train_data$Color)]=1
+test_data$has_black=0
+test_data$has_black[grep("Black",test_data$Color)]=1
+train_data$has_white=0
+train_data$has_white[grep("White",train_data$Color)]=1
+test_data$has_white=0
+test_data$has_white[grep("White",test_data$Color)]=1
+```
+
+###3) Deal with missing values
+
+```{r}
+#fill missing values
+train_data$AgeWeeks[which(is.na(train_data$AgeWeeks))]=0
+test_data$AgeWeeks[which(is.na(test_data$AgeWeeks))]=0
+#factor advsex column
+train_data$advSex=factor(train_data$advSex)
+test_data$advSex=factor(test_data$advSex)
+```
+
+## Variable Selection
+
+```{r}
+library(randomForest)
+training_indice=sample(c(1:nrow(train_data)),round(nrow(train_data)*0.8))
+testing_indice=setdiff(c(1:nrow(test_data)),training_indice)
+rf_model=randomForest(factor(OutcomeType)~AnimalType+namepop+namelength+
+                        breedpop+AgeWeeks+Hour+Weekday+Month+Year+advSex+
+                        intact+has_black+has_white+multi_color,
+                      data=train_data[training_indice,],ntree=2800,importance=TRUE)
+importance(rf_model)
+```
+
+## Cross Validation Function
+
+```{r}
+#evaluation function
+MultiLogLoss <- function(act, pred){
+  eps = 1e-15;
+  nr <- nrow(pred)
+  pred = matrix(sapply( pred, function(x) max(eps,x)), nrow = nr)      
+  pred = matrix(sapply( pred, function(x) min(1-eps,x)), nrow = nr)
+  act_matrix=matrix(0,nrow=length(act),ncol=ncol(pred))
+  for(i in c(1:length(act))){
+    act_matrix[i,as.numeric(act[i])]=1
+  }
+  #ll = sum(act_matrix*log(pred) + (1-act_matrix)*log(1-pred))
+  ll = sum(act_matrix*log(pred))
+  ll = ll * -1/nr  
+  return(ll)
+}
+```
+
+# Model Builidng
+
+* Random Forest
+
+```{r}
+library(randomForest)
+training_indice=sample(c(1:nrow(train_data)),round(nrow(train_data)*0.8))
+testing_indice=setdiff(c(1:nrow(test_data)),training_indice)
+rf_model=randomForest(factor(OutcomeType)~AnimalType+namepop+namelength+
+                        breedpop+AgeWeeks+Hour+Weekday+Month+Year+advSex+
+                        intact+has_black+has_white+multi_color,
+                      data=train_data[training_indice,],ntree=2800,importance=TRUE)
+importance(rf_model)
+validation_pred=predict(rf_model,train_data[testing_indice,],type="prob")
+MultiLogLoss(train_data$OutcomeType[testing_indice],validation_pred)
+rf_pred=predict(rf_model,test_data,type="prob")
+```
+
+* Generalized Boosted Regression Modeling with gbm package
+
+```{r}
+library(gbm)
+gbm_model=gbm(factor(OutcomeType)~AnimalType+namepop+namelength+
+                breedpop+AgeWeeks+Hour+Weekday+Month+Year+advSex+
+                intact+has_black+has_white+multi_color,
+              data=train_data[training_indice,],distribution="multinomial",
+              n.trees=2000,shrinkage=0.04,interaction.depth=6,verbose=TRUE,
+              train.fraction=0.9,keep.data=FALSE)
+gbm_prediction=predict(gbm_model,train_data[testing_indice,],n.trees=680,
+                       type="response")
+gbm_test_data_pred=predict(gbm_model,test_data,n.trees=680,type="response")
+MultiLogLoss(train_data$OutcomeType[testing_indice],gbm_prediction[,,1])
+```
+
+* Generalized Boosted Regression Modeling with xgboost package
+
+```{r}
+library(xgboost)
+#turn data to matrix
+train_rep=train_data[,c(-1,-3)]
+test_rep=test_data[,c(-2)]
+train_rep$AnimalType=ifelse(train_data$AnimalType=="Dog",1,0)
+test_rep$AnimalType=ifelse(test_data$AnimalType=="Dog",1,0)
+train_rep$advSex=ifelse(train_data$advSex=="Male",1,0)
+test_rep$advSex=ifelse(test_data$advSex=="Male",1,0)
+xgb.cv(objective="multi:softprob",data=as.matrix(train_rep),
+       label=as.numeric(train_data$OutcomeType)-1,
+       nround=2500,nfold=3,num_class=5,metrics="mlogloss",eta=0.008,subsample=0.8)
+xgb_model=xgboost(objective="multi:softprob",data=as.matrix(train_rep),
+              label=as.numeric(train_data$OutcomeType)-1,
+              nround=1585,num_class=5,eval_metric="mlogloss",eta=0.008,subsample=0.8)
+xgb_test_pred=predict(xgb_model,as.matrix(test_rep))
+xgb_test_pred=matrix(as.numeric(xgb_test_pred),nrow=11456,ncol=5,byrow=TRUE)
+```
+
+#Prediction Using Test Data
+
+```{r}
+setwd("/Users/hongzhu/Desktop")
+sub_data=read.csv("sample_submission.csv")
+sub_data$Adoption=xgb_test_pred[,1]*0.8+rf_pred[,1]*0.1+gbm_test_data_pred[,1,1]*0.1
+sub_data$Died=xgb_test_pred[,2]*0.8+rf_pred[,2]*0.1+gbm_test_data_pred[,2,1]*0.1
+sub_data$Euthanasia=xgb_test_pred[,3]*0.8+rf_pred[,3]*0.1+gbm_test_data_pred[,3,1]*0.1
+sub_data$Return_to_owner=xgb_test_pred[,4]*0.8+rf_pred[,4]*0.1+gbm_test_data_pred[,4,1]*0.1
+sub_data$Transfer=xgb_test_pred[,5]*0.8+rf_pred[,5]*0.1+gbm_test_data_pred[,5,1]*0.1
+write.csv(sub_data,"ensemble_model_pred.csv",row.names=FALSE)
+```
+
