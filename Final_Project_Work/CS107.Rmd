@@ -9,7 +9,7 @@ There are many animals ending up in shelters every year. 35% (2.7 millions out o
 
 Kaggle is hosting a competition since March 21, 2016 to help improve outcomes for shelter animals, in which more than 300 teams participate to predict the outcome of each animal using a dataset of intake information including breed, color, sex, and age from the Austin Animal Center from October 1st, 2013 to March, 2016. The insights could help shelters focus their energy on specific animals who need extra help finding a good adopter.
 
-At the mean time, Kaggle will provide test data, and all submissions are evaluated using the multi-class logarithmic loss.
+At the mean time, Kaggle will provide test data at https://www.kaggle.com/c/shelter-animal-outcomes/data (data can also be acceessed in Final_Project_folder in this repository, and all submissions are evaluated using the multi-class logarithmic loss.
 
 Read test data at first:
 
